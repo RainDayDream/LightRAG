@@ -108,7 +108,7 @@ class LightRAG:
 
     def __post_init__(self):
         if DEBUG:
-            print("in LightRAG post_init: initializing......")
+            print("in LightRAG's post_init: initializing......")
         log_file = os.path.join(self.working_dir, "lightrag.log")
         set_logger(log_file)
         logger.info(f"Logger initialized for working directory: {self.working_dir}")
