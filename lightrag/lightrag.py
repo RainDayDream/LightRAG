@@ -39,6 +39,9 @@ from .base import (
     QueryParam,
 )
 
+from .config import (
+    DEBUG,
+)
 
 def always_get_an_event_loop() -> asyncio.AbstractEventLoop:
     try:
@@ -52,6 +55,8 @@ def always_get_an_event_loop() -> asyncio.AbstractEventLoop:
 
 @dataclass
 class LightRAG:
+    if DEBUG:
+        print("in LightRAG: initializing......")
     working_dir: str = field(
         default_factory=lambda: f"./lightrag_cache_{datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}"
     )
@@ -102,6 +107,8 @@ class LightRAG:
     convert_response_to_json_func: callable = convert_response_to_json
 
     def __post_init__(self):
+        if DEBUG:
+            print("in LightRAG post_init: initializing......")
         log_file = os.path.join(self.working_dir, "lightrag.log")
         set_logger(log_file)
         logger.info(f"Logger initialized for working directory: {self.working_dir}")

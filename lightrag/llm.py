@@ -283,8 +283,11 @@ async def hf_model_if_cache(
         input_prompt, return_tensors="pt", padding=True, truncation=True
     ).to("cuda")
     inputs = {k: v.to(hf_model.device) for k, v in input_ids.items()}
+    # output = hf_model.generate(
+    #     **input_ids, max_new_tokens=512, num_return_sequences=1, early_stopping=True
+    # )
     output = hf_model.generate(
-        **input_ids, max_new_tokens=512, num_return_sequences=1, early_stopping=True
+        **input_ids, max_new_tokens=512, num_return_sequences=1
     )
     response_text = hf_tokenizer.decode(
         output[0][len(inputs["input_ids"][0]) :], skip_special_tokens=True
