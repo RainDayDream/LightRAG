@@ -25,11 +25,14 @@ from .base import (
     QueryParam,
 )
 from .prompt import GRAPH_FIELD_SEP, PROMPTS
-
+from .config import DEBUG
 
 def chunking_by_token_size(
     content: str, overlap_token_size=128, max_token_size=1024, tiktoken_model="gpt-4o"
 ):
+    if DEBUG:
+        logger.debug("chunking by 1024 tokens with 128 overlaped tokens......")
+    #xym's comments: encoding to the format suitable for tiktoken_model
     tokens = encode_string_by_tiktoken(content, model_name=tiktoken_model)
     results = []
     for index, start in enumerate(
@@ -262,6 +265,7 @@ async def extract_entities(
     already_entities = 0
     already_relations = 0
 
+    #xym's comments: use llm to extract nodes and edges from chunks,使用大模型提取块中的实体和边
     async def _process_single_content(chunk_key_dp: tuple[str, TextChunkSchema]):
         nonlocal already_processed, already_entities, already_relations
         chunk_key = chunk_key_dp[0]
@@ -270,10 +274,13 @@ async def extract_entities(
         hint_prompt = entity_extract_prompt.format(**context_base, input_text=content)
         final_result = await use_llm_func(hint_prompt)
 
+        if DEBUG:
+            logger.debug(f"now is processing chunk {chunk_key},extracting entities and relations \n result {final_result} \n")
         history = pack_user_ass_to_openai_messages(hint_prompt, final_result)
         for now_glean_index in range(entity_extract_max_gleaning):
             glean_result = await use_llm_func(continue_prompt, history_messages=history)
-
+            if DEBUG:
+                logger.debug(f"now is in {chunk_key}'s glean_index,extract entities and relations \n glean_result is :{glean_result} \n")
             history += pack_user_ass_to_openai_messages(continue_prompt, glean_result)
             final_result += glean_result
             if now_glean_index == entity_extract_max_gleaning - 1:
@@ -340,12 +347,15 @@ async def extract_entities(
             maybe_nodes[k].extend(v)
         for k, v in m_edges.items():
             maybe_edges[tuple(sorted(k))].extend(v)
+    
+    #xym's comments: de-duplicatie nodes,去除重复的点，insert nodes into graph
     all_entities_data = await asyncio.gather(
         *[
             _merge_nodes_then_upsert(k, v, knowledge_graph_inst, global_config)
             for k, v in maybe_nodes.items()
         ]
     )
+    #xym's comments : de-duplicate edges,去除重复的边,insert edges into graphs
     all_relationships_data = await asyncio.gather(
         *[
             _merge_edges_then_upsert(k[0], k[1], v, knowledge_graph_inst, global_config)
@@ -361,6 +371,7 @@ async def extract_entities(
         )
         return None
 
+    #convert nodes and edges into vectors,转换向量保存用于检索
     if entity_vdb is not None:
         data_for_vdb = {
             compute_mdhash_id(dp["entity_name"], prefix="ent-"): {

@@ -180,16 +180,14 @@ class LightRAG:
                 string_or_strings = [string_or_strings]
 
             if DEBUG:
-                logger.debug("computing hash vector......")
-            #xym's comments: compute hash vector, store vector index for retrieve
+                logger.debug("computing every doc's  hash vector......")
+            #xym's comments: compute docs's hash vector,store doc's index for linking origin text,计算原文本的hash值，链接原文本
             new_docs = {
                 compute_mdhash_id(c.strip(), prefix="doc-"): {"content": c.strip()}
                 for c in string_or_strings
             }
             
-            if DEBUG:
-                logger.debug("deplicating......")
-            #xym's comments: depulicate 
+            #xym's comments: de-duplicate docs
             _add_doc_keys = await self.full_docs.filter_keys(list(new_docs.keys()))
             new_docs = {k: v for k, v in new_docs.items() if k in _add_doc_keys}
             if not len(new_docs):
@@ -197,6 +195,7 @@ class LightRAG:
                 return
             logger.info(f"[New Docs] inserting {len(new_docs)} docs")
 
+            #xym's commments: compute chunks's hash vector,计算文本块的hash值
             inserting_chunks = {}
             for doc_key, doc in new_docs.items():
                 chunks = {
@@ -212,6 +211,8 @@ class LightRAG:
                     )
                 }
                 inserting_chunks.update(chunks)
+
+            #xym's comments: de-duplicate chunks,删掉重复块
             _add_chunk_keys = await self.text_chunks.filter_keys(
                 list(inserting_chunks.keys())
             )
