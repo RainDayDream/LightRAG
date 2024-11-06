@@ -29,7 +29,8 @@ import torch
 from pydantic import BaseModel, Field
 from typing import List, Dict, Callable, Any
 from .base import BaseKVStorage
-from .utils import compute_args_hash, wrap_embedding_func_with_attrs
+from .utils import compute_args_hash, wrap_embedding_func_with_attrs, logger
+from .config import DEBUG
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -217,6 +218,8 @@ async def bedrock_complete_if_cache(
 
 @lru_cache(maxsize=1)
 def initialize_hf_model(model_name):
+    if DEBUG:
+        logger.debug("loading model......")
     hf_tokenizer = AutoTokenizer.from_pretrained(
         model_name, device_map="auto", trust_remote_code=True
     )
@@ -232,6 +235,8 @@ def initialize_hf_model(model_name):
 async def hf_model_if_cache(
     model, prompt, system_prompt=None, history_messages=[], **kwargs
 ) -> str:
+    if DEBUG:
+        logger.debug("in hf_complete_if_cache " + model)
     model_name = model
     hf_model, hf_tokenizer = initialize_hf_model(model_name)
     hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
@@ -289,9 +294,12 @@ async def hf_model_if_cache(
     output = hf_model.generate(
         **input_ids, max_new_tokens=512, num_return_sequences=1
     )
+    
     response_text = hf_tokenizer.decode(
         output[0][len(inputs["input_ids"][0]) :], skip_special_tokens=True
     )
+    if DEBUG:
+        logger.debug("hf_model's decoded output:" + response_text)
     if hashing_kv is not None:
         await hashing_kv.upsert({args_hash: {"return": response_text, "model": model}})
     return response_text
@@ -510,6 +518,8 @@ async def hf_model_complete(
     prompt, system_prompt=None, history_messages=[], **kwargs
 ) -> str:
     model_name = kwargs["hashing_kv"].global_config["llm_model_name"]
+    if DEBUG:
+        logger.debug("hf_model_complete " + model_name)
     return await hf_model_if_cache(
         model_name,
         prompt,

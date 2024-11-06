@@ -15,6 +15,8 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import tiktoken
 
+from .config import DEBUG
+
 ENCODER = None
 
 logger = logging.getLogger("lightrag")
@@ -79,7 +81,8 @@ def limit_async_func_call(max_size: int, waitting_time: float = 0.0001):
     def final_decro(func):
         """Not using async.Semaphore to aovid use nest-asyncio"""
         __current_size = 0
-
+        if DEBUG:
+            logger.debug("limit_asynv_func_call's final decro's " + type(func).__name__)
         @wraps(func)
         async def wait_func(*args, **kwargs):
             nonlocal __current_size

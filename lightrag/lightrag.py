@@ -107,11 +107,12 @@ class LightRAG:
     convert_response_to_json_func: callable = convert_response_to_json
 
     def __post_init__(self):
-        if DEBUG:
-            print("in LightRAG's post_init: initializing......")
+
         log_file = os.path.join(self.working_dir, "lightrag.log")
         set_logger(log_file)
         logger.info(f"Logger initialized for working directory: {self.working_dir}")
+        if DEBUG:
+            logger.debug("in LightRAG's post_init: initializing......")
 
         _print_config = ",\n  ".join([f"{k} = {v}" for k, v in asdict(self).items()])
         logger.debug(f"LightRAG init with param:\n  {_print_config}\n")
@@ -178,10 +179,17 @@ class LightRAG:
             if isinstance(string_or_strings, str):
                 string_or_strings = [string_or_strings]
 
+            if DEBUG:
+                logger.debug("computing hash vector......")
+            #xym's comments: compute hash vector, store vector index for retrieve
             new_docs = {
                 compute_mdhash_id(c.strip(), prefix="doc-"): {"content": c.strip()}
                 for c in string_or_strings
             }
+            
+            if DEBUG:
+                logger.debug("deplicating......")
+            #xym's comments: depulicate 
             _add_doc_keys = await self.full_docs.filter_keys(list(new_docs.keys()))
             new_docs = {k: v for k, v in new_docs.items() if k in _add_doc_keys}
             if not len(new_docs):
