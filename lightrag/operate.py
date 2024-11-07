@@ -373,7 +373,6 @@ async def extract_entities(
         )
         return None
 
-    #convert nodes and edges into vectors,转换向量保存用于检索
     if entity_vdb is not None:
         data_for_vdb = {
             compute_mdhash_id(dp["entity_name"], prefix="ent-"): {

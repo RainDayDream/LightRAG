@@ -224,6 +224,7 @@ class LightRAG:
                 return
             logger.info(f"[New Chunks] inserting {len(inserting_chunks)} chunks")
 
+            #xym's comments: store chunks's vector
             await self.chunks_vdb.upsert(inserting_chunks)
 
             logger.info("[Entity Extraction]...")

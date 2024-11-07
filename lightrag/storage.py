@@ -13,7 +13,7 @@ from .base import (
     BaseKVStorage,
     BaseVectorStorage,
 )
-
+from .config import DEBUG
 
 @dataclass
 class JsonKVStorage(BaseKVStorage):
@@ -89,6 +89,9 @@ class NanoVectorDBStorage(BaseVectorStorage):
             contents[i : i + self._max_batch_size]
             for i in range(0, len(contents), self._max_batch_size)
         ]
+        if DEBUG:
+            logger.debug("embedding_func model converts text into vector......")
+        #xym's commments: convert text into vector
         embeddings_list = await asyncio.gather(
             *[self.embedding_func(batch) for batch in batches]
         )
