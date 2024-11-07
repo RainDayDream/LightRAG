@@ -411,6 +411,8 @@ async def local_query(
     context = None
     use_model_func = global_config["llm_model_func"]
 
+
+    #extract keywords from query using llm,使用大模型提取query中的关键词
     kw_prompt_temp = PROMPTS["keywords_extraction"]
     kw_prompt = kw_prompt_temp.format(query=query)
     result = await use_model_func(kw_prompt)
@@ -477,6 +479,8 @@ async def _build_local_query_context(
     text_chunks_db: BaseKVStorage[TextChunkSchema],
     query_param: QueryParam,
 ):
+    if DEBUG:
+        logger.debug("local query......use cosine to get topk vector......")
     results = await entities_vdb.query(query, top_k=query_param.top_k)
     if not len(results):
         return None
@@ -618,16 +622,20 @@ async def _find_most_related_edges_from_entities(
     query_param: QueryParam,
     knowledge_graph_inst: BaseGraphStorage,
 ):
+    #xym's comments: use entity to get all edges that have entity
     all_related_edges = await asyncio.gather(
         *[knowledge_graph_inst.get_node_edges(dp["entity_name"]) for dp in node_datas]
     )
     all_edges = set()
+    #xym's comments : sort every edge's nodes to make (n1,n2) and (n2,n1) equal
     for this_edges in all_related_edges:
         all_edges.update([tuple(sorted(e)) for e in this_edges])
     all_edges = list(all_edges)
+    #xym's comments: get edges's info
     all_edges_pack = await asyncio.gather(
         *[knowledge_graph_inst.get_edge(e[0], e[1]) for e in all_edges]
     )
+    #xym's comments: get edge's degrees,equal source node's degrees + destination node's degrees
     all_edges_degree = await asyncio.gather(
         *[knowledge_graph_inst.edge_degree(e[0], e[1]) for e in all_edges]
     )
@@ -636,6 +644,7 @@ async def _find_most_related_edges_from_entities(
         for k, v, d in zip(all_edges, all_edges_pack, all_edges_degree)
         if v is not None
     ]
+    #xym's comments: sort edges by weight(degrees)
     all_edges_data = sorted(
         all_edges_data, key=lambda x: (x["rank"], x["weight"]), reverse=True
     )
