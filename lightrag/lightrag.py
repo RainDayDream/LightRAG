@@ -55,8 +55,8 @@ def always_get_an_event_loop() -> asyncio.AbstractEventLoop:
 
 @dataclass
 class LightRAG:
-    if DEBUG:
-        print("in LightRAG: initializing......")
+    # if DEBUG:
+    #     print("in LightRAG: initializing......")
     working_dir: str = field(
         default_factory=lambda: f"./lightrag_cache_{datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}"
     )

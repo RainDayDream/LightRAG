@@ -275,12 +275,14 @@ async def extract_entities(
         final_result = await use_llm_func(hint_prompt)
 
         if DEBUG:
-            logger.debug(f"now is processing chunk {chunk_key},extracting entities and relations \n result {final_result} \n")
+            # logger.debug(f"now is processing chunk {chunk_key},extracting entities and relations \n result {final_result} \n")
+            logger.debug(f"now is processing chunk {chunk_key},extracting entities and relations ")
         history = pack_user_ass_to_openai_messages(hint_prompt, final_result)
         for now_glean_index in range(entity_extract_max_gleaning):
             glean_result = await use_llm_func(continue_prompt, history_messages=history)
             if DEBUG:
-                logger.debug(f"now is in {chunk_key}'s glean_index,extract entities and relations \n glean_result is :{glean_result} \n")
+                # logger.debug(f"now is in {chunk_key}'s glean_index,extract entities and relations \n glean_result is :{glean_result} \n")
+                logger.debug(f"now is in {chunk_key}'s glean_index,extract additional entities and relations ")
             history += pack_user_ass_to_openai_messages(continue_prompt, glean_result)
             final_result += glean_result
             if now_glean_index == entity_extract_max_gleaning - 1:

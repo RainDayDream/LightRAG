@@ -299,7 +299,7 @@ async def hf_model_if_cache(
         output[0][len(inputs["input_ids"][0]) :], skip_special_tokens=True
     )
     if DEBUG:
-        logger.debug("hf_model's decoded output:" + response_text)
+        logger.debug("hf_model's decoded output:\n" + response_text)
     if hashing_kv is not None:
         await hashing_kv.upsert({args_hash: {"return": response_text, "model": model}})
     return response_text
