@@ -422,6 +422,8 @@ async def local_query(
         keywords_data = json.loads(result)
         keywords = keywords_data.get("low_level_keywords", [])
         keywords = ", ".join(keywords)
+        if DEBUG:
+            logger.debug(f"query's keywords are {keywords}")
     except json.JSONDecodeError:
         try:
             result = (
