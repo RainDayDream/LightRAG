@@ -65,10 +65,11 @@ class LightRAG:
     chunk_token_size: int = 1200
     chunk_overlap_token_size: int = 100
     tiktoken_model_name: str = "gpt-4o-mini"
-
+ 
     # entity extraction
     entity_extract_max_gleaning: int = 1
     entity_summary_to_max_tokens: int = 500
+    chunk_batch_size : int = 4
 
     # node embedding
     node_embedding_algorithm: str = "node2vec"

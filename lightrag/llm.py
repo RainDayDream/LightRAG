@@ -240,69 +240,114 @@ async def hf_model_if_cache(
     model_name = model
     hf_model, hf_tokenizer = initialize_hf_model(model_name)
     hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
+    batch_size = kwargs.get("batch_size", 1)
+
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.extend(history_messages)
-    messages.append({"role": "user", "content": prompt})
 
-    if hashing_kv is not None:
-        args_hash = compute_args_hash(model, messages)
-        if_cache_return = await hashing_kv.get_by_id(args_hash)
-        if if_cache_return is not None:
-            return if_cache_return["return"]
-    input_prompt = ""
-    try:
-        input_prompt = hf_tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
-    except Exception:
-        try:
-            ori_message = copy.deepcopy(messages)
-            if messages[0]["role"] == "system":
-                messages[1]["content"] = (
-                    "<system>"
-                    + messages[0]["content"]
-                    + "</system>\n"
-                    + messages[1]["content"]
-                )
-                messages = messages[1:]
+    # 创建每个输入的独立消息
+    input_prompts = []
+    if batch_size > 1:
+        for single_prompt in prompt:
+            batch_messages = messages + [{"role": "user", "content": single_prompt}]
+            if hashing_kv is not None:
+                args_hash = compute_args_hash(model, batch_messages)
+                if_cache_return = await hashing_kv.get_by_id(args_hash)
+                if if_cache_return is not None:
+                    continue
+            try:
                 input_prompt = hf_tokenizer.apply_chat_template(
-                    messages, tokenize=False, add_generation_prompt=True
+                    batch_messages, tokenize=False, add_generation_prompt=True
                 )
+            except Exception:
+                ori_message = copy.deepcopy(batch_messages)
+                if batch_messages[0]["role"] == "system":
+                    batch_messages[1]["content"] = (
+                        f"<system>{batch_messages[0]['content']}</system>\n{batch_messages[1]['content']}"
+                    )
+                    batch_messages = batch_messages[1:]
+                try:
+                    input_prompt = hf_tokenizer.apply_chat_template(
+                        batch_messages, tokenize=False, add_generation_prompt=True
+                    )
+                except Exception:
+                    input_prompt = "".join(
+                        f"<{msg['role']}>{msg['content']}</{msg['role']}>\n" for msg in ori_message
+                    )
+            input_prompts.append(input_prompt)
+    else:
+        messages.append({"role": "user", "content": prompt}) 
+        if hashing_kv is not None:
+            args_hash = compute_args_hash(model, messages)
+            if_cache_return = await hashing_kv.get_by_id(args_hash)
+            if if_cache_return is not None:
+                return if_cache_return["return"]
+        try:
+            input_prompt = hf_tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
         except Exception:
-            len_message = len(ori_message)
-            for msgid in range(len_message):
-                input_prompt = (
-                    input_prompt
-                    + "<"
-                    + ori_message[msgid]["role"]
-                    + ">"
-                    + ori_message[msgid]["content"]
-                    + "</"
-                    + ori_message[msgid]["role"]
-                    + ">\n"
-                )
+            try:
+                ori_message = copy.deepcopy(messages)
+                if messages[0]["role"] == "system":
+                    messages[1]["content"] = (
+                        "<system>"
+                        + messages[0]["content"]
+                        + "</system>\n"
+                        + messages[1]["content"]
+                    )
+                    messages = messages[1:]
+                    input_prompt = hf_tokenizer.apply_chat_template(
+                        messages, tokenize=False, add_generation_prompt=True
+                    )
+            except Exception:
+                len_message = len(ori_message)
+                for msgid in range(len_message):
+                    input_prompt = (
+                        input_prompt
+                        + "<"
+                        + ori_message[msgid]["role"]
+                        + ">"
+                        + ori_message[msgid]["content"]
+                        + "</"
+                        + ori_message[msgid]["role"]
+                        + ">\n"
+                    )
+        input_prompts.append(input_prompt)
 
+    if len(input_prompts) == 0:
+        return if_cache_return["return"]
+    
+    # 将 input_prompts 批量化，并转换为模型输入格式
     input_ids = hf_tokenizer(
-        input_prompt, return_tensors="pt", padding=True, truncation=True
+        input_prompts, return_tensors="pt", padding=True, truncation=True
     ).to("cuda")
     inputs = {k: v.to(hf_model.device) for k, v in input_ids.items()}
+    # 生成 batch_size 个响应
     # output = hf_model.generate(
     #     **input_ids, max_new_tokens=512, num_return_sequences=1, early_stopping=True
     # )
-    output = hf_model.generate(
+    outputs = hf_model.generate(
         **input_ids, max_new_tokens=512, num_return_sequences=1
     )
-    
-    response_text = hf_tokenizer.decode(
-        output[0][len(inputs["input_ids"][0]) :], skip_special_tokens=True
-    )
-    if DEBUG:
-        logger.debug("hf_model's decoded output:\n" + response_text)
-    if hashing_kv is not None:
-        await hashing_kv.upsert({args_hash: {"return": response_text, "model": model}})
-    return response_text
+
+    # 解码所有响应
+    response_texts = []
+    for i in range(len(input_prompts)):
+        response_text = hf_tokenizer.decode(
+            outputs[i][len(inputs["input_ids"][i]):], skip_special_tokens=True
+        )
+        if DEBUG:
+            logger.debug("hf_model's decoded output:\n" + response_text)
+        if hashing_kv is not None:
+            await hashing_kv.upsert({args_hash: {"return": response_text, "model": model}})
+        response_texts.append(response_text)
+
+    # `response_texts` 中将包含所有响应
+
+    return response_texts
 
 
 async def ollama_model_if_cache(
