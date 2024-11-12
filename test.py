@@ -50,7 +50,7 @@ def monitor_resources_real_time(process, monitoring_data, interval=1):
     """
     while not stop_event.is_set():
         # 获取 CPU 和内存使用情况
-        cpu_percent = psutil.cpu_percent(interval=interval)
+        cpu_percent = process.cpu_percent(interval=interval)
         memory_info = process.memory_info().rss / (1024 * 1024)
         io_counters = process.io_counters()
         io_read_bytes = io_counters.read_bytes
@@ -129,10 +129,10 @@ def monitor_function(func, csv_file_path, *args, **kwargs):
 
 # 执行插入操作并监控资源
 with open("./book.txt", "r", encoding="utf-8") as f:
-    monitor_function(lambda: rag.insert(f.read()), csv_file_path="./sys_resource/insert.csv")
+    monitor_function(lambda: rag.insert(f.read()), csv_file_path ="./sys_resource/insert.csv")
 
 # 执行查询操作并监控资源
 modes = ["naive", "local", "global", "hybrid"]
 for mode in modes:
     print(f"{mode} :\n")
-    print(monitor_function(lambda: rag.query("What are the top themes in this story?", param=QueryParam(mode=mode)), csv_file_path=f"./sys_resource/{mode}.csv"))
+    print(monitor_function(lambda: rag.query("What are the top themes in this story?", param=QueryParam(mode=mode)), csv_file_path = f"./sys_resource/{mode}.csv"))
