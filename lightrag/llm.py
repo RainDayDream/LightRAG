@@ -249,73 +249,100 @@ async def hf_model_if_cache(
 
     # 创建每个输入的独立消息
     input_prompts = []
-    if batch_size > 1:
-        for single_prompt in prompt:
-            batch_messages = messages + [{"role": "user", "content": single_prompt}]
-            if hashing_kv is not None:
-                args_hash = compute_args_hash(model, batch_messages)
-                if_cache_return = await hashing_kv.get_by_id(args_hash)
-                if if_cache_return is not None:
-                    continue
+    for single_prompt in prompt:
+        batch_messages = messages + [{"role": "user", "content": single_prompt}]
+        if hashing_kv is not None:
+            args_hash = compute_args_hash(model, batch_messages)
+            if_cache_return = await hashing_kv.get_by_id(args_hash)
+            if if_cache_return is not None:
+                continue
+        try:
+            input_prompt = hf_tokenizer.apply_chat_template(
+                batch_messages, tokenize=False, add_generation_prompt=True
+            )
+        except Exception:
+            ori_message = copy.deepcopy(batch_messages)
+            if batch_messages[0]["role"] == "system":
+                batch_messages[1]["content"] = (
+                    f"<system>{batch_messages[0]['content']}</system>\n{batch_messages[1]['content']}"
+                )
+                batch_messages = batch_messages[1:]
             try:
                 input_prompt = hf_tokenizer.apply_chat_template(
                     batch_messages, tokenize=False, add_generation_prompt=True
                 )
             except Exception:
-                ori_message = copy.deepcopy(batch_messages)
-                if batch_messages[0]["role"] == "system":
-                    batch_messages[1]["content"] = (
-                        f"<system>{batch_messages[0]['content']}</system>\n{batch_messages[1]['content']}"
-                    )
-                    batch_messages = batch_messages[1:]
-                try:
-                    input_prompt = hf_tokenizer.apply_chat_template(
-                        batch_messages, tokenize=False, add_generation_prompt=True
-                    )
-                except Exception:
-                    input_prompt = "".join(
-                        f"<{msg['role']}>{msg['content']}</{msg['role']}>\n" for msg in ori_message
-                    )
-            input_prompts.append(input_prompt)
-    else:
-        messages.append({"role": "user", "content": prompt}) 
-        if hashing_kv is not None:
-            args_hash = compute_args_hash(model, messages)
-            if_cache_return = await hashing_kv.get_by_id(args_hash)
-            if if_cache_return is not None:
-                return if_cache_return["return"]
-        try:
-            input_prompt = hf_tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-        except Exception:
-            try:
-                ori_message = copy.deepcopy(messages)
-                if messages[0]["role"] == "system":
-                    messages[1]["content"] = (
-                        "<system>"
-                        + messages[0]["content"]
-                        + "</system>\n"
-                        + messages[1]["content"]
-                    )
-                    messages = messages[1:]
-                    input_prompt = hf_tokenizer.apply_chat_template(
-                        messages, tokenize=False, add_generation_prompt=True
-                    )
-            except Exception:
-                len_message = len(ori_message)
-                for msgid in range(len_message):
-                    input_prompt = (
-                        input_prompt
-                        + "<"
-                        + ori_message[msgid]["role"]
-                        + ">"
-                        + ori_message[msgid]["content"]
-                        + "</"
-                        + ori_message[msgid]["role"]
-                        + ">\n"
-                    )
+                input_prompt = "".join(
+                    f"<{msg['role']}>{msg['content']}</{msg['role']}>\n" for msg in ori_message
+                )
         input_prompts.append(input_prompt)
+    # if batch_size > 1:
+    #     for single_prompt in prompt:
+    #         batch_messages = messages + [{"role": "user", "content": single_prompt}]
+    #         if hashing_kv is not None:
+    #             args_hash = compute_args_hash(model, batch_messages)
+    #             if_cache_return = await hashing_kv.get_by_id(args_hash)
+    #             if if_cache_return is not None:
+    #                 continue
+    #         try:
+    #             input_prompt = hf_tokenizer.apply_chat_template(
+    #                 batch_messages, tokenize=False, add_generation_prompt=True
+    #             )
+    #         except Exception:
+    #             ori_message = copy.deepcopy(batch_messages)
+    #             if batch_messages[0]["role"] == "system":
+    #                 batch_messages[1]["content"] = (
+    #                     f"<system>{batch_messages[0]['content']}</system>\n{batch_messages[1]['content']}"
+    #                 )
+    #                 batch_messages = batch_messages[1:]
+    #             try:
+    #                 input_prompt = hf_tokenizer.apply_chat_template(
+    #                     batch_messages, tokenize=False, add_generation_prompt=True
+    #                 )
+    #             except Exception:
+    #                 input_prompt = "".join(
+    #                     f"<{msg['role']}>{msg['content']}</{msg['role']}>\n" for msg in ori_message
+    #                 )
+    #         input_prompts.append(input_prompt)
+    # else:
+    #     messages.append({"role": "user", "content": prompt}) 
+    #     if hashing_kv is not None:
+    #         args_hash = compute_args_hash(model, messages)
+    #         if_cache_return = await hashing_kv.get_by_id(args_hash)
+    #         if if_cache_return is not None:
+    #             return if_cache_return["return"]
+    #     try:
+    #         input_prompt = hf_tokenizer.apply_chat_template(
+    #             messages, tokenize=False, add_generation_prompt=True
+    #         )
+    #     except Exception:
+    #         try:
+    #             ori_message = copy.deepcopy(messages)
+    #             if messages[0]["role"] == "system":
+    #                 messages[1]["content"] = (
+    #                     "<system>"
+    #                     + messages[0]["content"]
+    #                     + "</system>\n"
+    #                     + messages[1]["content"]
+    #                 )
+    #                 messages = messages[1:]
+    #                 input_prompt = hf_tokenizer.apply_chat_template(
+    #                     messages, tokenize=False, add_generation_prompt=True
+    #                 )
+    #         except Exception:
+    #             len_message = len(ori_message)
+    #             for msgid in range(len_message):
+    #                 input_prompt = (
+    #                     input_prompt
+    #                     + "<"
+    #                     + ori_message[msgid]["role"]
+    #                     + ">"
+    #                     + ori_message[msgid]["content"]
+    #                     + "</"
+    #                     + ori_message[msgid]["role"]
+    #                     + ">\n"
+    #                 )
+    #     input_prompts.append(input_prompt)
 
     if len(input_prompts) == 0:
         return if_cache_return["return"]
@@ -335,7 +362,7 @@ async def hf_model_if_cache(
 
     # 解码所有响应
     response_texts = []
-    for i in range(len(input_prompts)):
+    for i in range(len(outputs)):
         response_text = hf_tokenizer.decode(
             outputs[i][len(inputs["input_ids"][i]):], skip_special_tokens=True
         )
