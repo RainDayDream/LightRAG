@@ -286,8 +286,11 @@ async def hf_model_if_cache(
         input_prompt, return_tensors="pt", padding=True, truncation=True
     ).to("cuda")
     inputs = {k: v.to(hf_model.device) for k, v in input_ids.items()}
+    # output = hf_model.generate(
+    #     **input_ids, max_new_tokens=512, num_return_sequences=1, early_stopping=True
+    # )
     output = hf_model.generate(
-        **input_ids, max_new_tokens=512, num_return_sequences=1, early_stopping=True
+        **input_ids, max_new_tokens=512, num_return_sequences=1
     )
     response_text = hf_tokenizer.decode(
         output[0][len(inputs["input_ids"][0]) :], skip_special_tokens=True
@@ -322,9 +325,10 @@ async def hf_model_if_cache_batch(
     model_name = model
     hf_model, hf_tokenizer = initialize_hf_model(model_name)
     hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
-    batch_size = kwargs.get("batch_size", 1)
+    batch_size = kwargs.get("batch_size", None)
     if DEBUG:
-        logger.debug("batch_size : " + str(batch_size))
+        if batch_size is not None:
+            logger.debug("batch_size : " + str(batch_size))
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
