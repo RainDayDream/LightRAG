@@ -333,7 +333,8 @@ async def hf_model_if_cache_batch(
     input_prompts = []
     for index, single_prompt in enumerate(prompt):
         batch_messages = messages 
-        batch_messages.extend(history_messages[index])
+        if len(history_messages) != 0:
+            batch_messages.extend(history_messages[index])
         batch_messages.append({"role": "user", "content": single_prompt})
         if hashing_kv is not None:
             args_hash = compute_args_hash(model, batch_messages)
@@ -377,6 +378,8 @@ async def hf_model_if_cache_batch(
     outputs = hf_model.generate(
         **input_ids, max_new_tokens=512, num_return_sequences=1
     )
+    if DEBUG:
+        logger.debug("generate successfully! hf_model's outputs's length is : " + str(len(outputs)))
     # 解码所有响应
     response_texts = []
     for i in range(len(outputs)):
@@ -604,7 +607,7 @@ async def bedrock_complete(
     )
 
 
-async def hf_model_complete(
+async def hf_model_complete_batch(
     prompt, system_prompt=None, history_messages=[], **kwargs
 ) -> str:
     model_name = kwargs["hashing_kv"].global_config["llm_model_name"]
@@ -624,6 +627,21 @@ async def hf_model_complete(
         history_messages=history_messages,
         **kwargs,
     )
+
+async def hf_model_complete(
+    prompt, system_prompt=None, history_messages=[], **kwargs
+) -> str:
+    model_name = kwargs["hashing_kv"].global_config["llm_model_name"]
+    if DEBUG:
+        logger.debug("hf_model_complete " + model_name)
+    return await hf_model_if_cache(
+        model_name,
+        prompt,
+        system_prompt=system_prompt,
+        history_messages=history_messages,
+        **kwargs,
+    )
+
 
 
 async def ollama_model_complete(

@@ -397,7 +397,7 @@ async def extract_entities_batch(
     relationships_vdb: BaseVectorStorage,
     global_config: dict,
 ) -> Union[BaseGraphStorage, None]:
-    use_llm_func: callable = global_config["llm_model_func"]
+    use_llm_func: callable = global_config["llm_model_func_batch"]
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
     chunk_batch_size = global_config["chunk_batch_size"]
     ordered_chunks = list(chunks.items())
