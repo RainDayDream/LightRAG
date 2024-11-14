@@ -31,6 +31,7 @@ from typing import List, Dict, Callable, Any
 from .base import BaseKVStorage
 from .utils import compute_args_hash, wrap_embedding_func_with_attrs, logger
 from .config import DEBUG
+from torch.cuda.amp import autocast
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -216,10 +217,9 @@ async def bedrock_complete_if_cache(
         return response["output"]["message"]["content"][0]["text"]
 
 
+
 @lru_cache(maxsize=1)
 def initialize_hf_model(model_name):
-    if DEBUG:
-        logger.debug("loading model......")
     hf_tokenizer = AutoTokenizer.from_pretrained(
         model_name, device_map="auto", trust_remote_code=True
     )
@@ -235,22 +235,106 @@ def initialize_hf_model(model_name):
 async def hf_model_if_cache(
     model, prompt, system_prompt=None, history_messages=[], **kwargs
 ) -> str:
+    model_name = model
+    hf_model, hf_tokenizer = initialize_hf_model(model_name)
+    hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.extend(history_messages)
+    messages.append({"role": "user", "content": prompt})
+
+    if hashing_kv is not None:
+        args_hash = compute_args_hash(model, messages)
+        if_cache_return = await hashing_kv.get_by_id(args_hash)
+        if if_cache_return is not None:
+            return if_cache_return["return"]
+    input_prompt = ""
+    try:
+        input_prompt = hf_tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+    except Exception:
+        try:
+            ori_message = copy.deepcopy(messages)
+            if messages[0]["role"] == "system":
+                messages[1]["content"] = (
+                    "<system>"
+                    + messages[0]["content"]
+                    + "</system>\n"
+                    + messages[1]["content"]
+                )
+                messages = messages[1:]
+                input_prompt = hf_tokenizer.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True
+                )
+        except Exception:
+            len_message = len(ori_message)
+            for msgid in range(len_message):
+                input_prompt = (
+                    input_prompt
+                    + "<"
+                    + ori_message[msgid]["role"]
+                    + ">"
+                    + ori_message[msgid]["content"]
+                    + "</"
+                    + ori_message[msgid]["role"]
+                    + ">\n"
+                )
+
+    input_ids = hf_tokenizer(
+        input_prompt, return_tensors="pt", padding=True, truncation=True
+    ).to("cuda")
+    inputs = {k: v.to(hf_model.device) for k, v in input_ids.items()}
+    output = hf_model.generate(
+        **input_ids, max_new_tokens=512, num_return_sequences=1, early_stopping=True
+    )
+    response_text = hf_tokenizer.decode(
+        output[0][len(inputs["input_ids"][0]) :], skip_special_tokens=True
+    )
+    if hashing_kv is not None:
+        await hashing_kv.upsert({args_hash: {"return": response_text, "model": model}})
+    return response_text
+
+
+@lru_cache(maxsize=1)
+def initialize_hf_model_batch(model_name):
+    if DEBUG:
+        logger.debug("loading model......")
+    hf_tokenizer = AutoTokenizer.from_pretrained(
+        model_name, device_map="auto", trust_remote_code=True
+    )
+    hf_model = AutoModelForCausalLM.from_pretrained(
+        model_name, device_map="auto", trust_remote_code=True
+    )
+    if hf_tokenizer.pad_token is None:
+        hf_tokenizer.pad_token = hf_tokenizer.eos_token
+    # #parallel model 
+    # hf_model = torch.nn.DataParallel(hf_model, device_ids=[0, 1])  # Use GPUs 0 and 1
+    # hf_model = hf_model.to("cuda")
+    return hf_model, hf_tokenizer
+
+async def hf_model_if_cache_batch(
+    model, prompt, system_prompt=None, history_messages=[], **kwargs
+) -> str:
     if DEBUG:
         logger.debug("in hf_complete_if_cache " + model)
     model_name = model
     hf_model, hf_tokenizer = initialize_hf_model(model_name)
     hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
     batch_size = kwargs.get("batch_size", 1)
-
+    if DEBUG:
+        logger.debug("batch_size : " + str(batch_size))
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-    messages.extend(history_messages)
-
-    # 创建每个输入的独立消息
+    
+    # 创建输入
     input_prompts = []
-    for single_prompt in prompt:
-        batch_messages = messages + [{"role": "user", "content": single_prompt}]
+    for index, single_prompt in enumerate(prompt):
+        batch_messages = messages 
+        batch_messages.extend(history_messages[index])
+        batch_messages.append({"role": "user", "content": single_prompt})
         if hashing_kv is not None:
             args_hash = compute_args_hash(model, batch_messages)
             if_cache_return = await hashing_kv.get_by_id(args_hash)
@@ -276,74 +360,8 @@ async def hf_model_if_cache(
                     f"<{msg['role']}>{msg['content']}</{msg['role']}>\n" for msg in ori_message
                 )
         input_prompts.append(input_prompt)
-    # if batch_size > 1:
-    #     for single_prompt in prompt:
-    #         batch_messages = messages + [{"role": "user", "content": single_prompt}]
-    #         if hashing_kv is not None:
-    #             args_hash = compute_args_hash(model, batch_messages)
-    #             if_cache_return = await hashing_kv.get_by_id(args_hash)
-    #             if if_cache_return is not None:
-    #                 continue
-    #         try:
-    #             input_prompt = hf_tokenizer.apply_chat_template(
-    #                 batch_messages, tokenize=False, add_generation_prompt=True
-    #             )
-    #         except Exception:
-    #             ori_message = copy.deepcopy(batch_messages)
-    #             if batch_messages[0]["role"] == "system":
-    #                 batch_messages[1]["content"] = (
-    #                     f"<system>{batch_messages[0]['content']}</system>\n{batch_messages[1]['content']}"
-    #                 )
-    #                 batch_messages = batch_messages[1:]
-    #             try:
-    #                 input_prompt = hf_tokenizer.apply_chat_template(
-    #                     batch_messages, tokenize=False, add_generation_prompt=True
-    #                 )
-    #             except Exception:
-    #                 input_prompt = "".join(
-    #                     f"<{msg['role']}>{msg['content']}</{msg['role']}>\n" for msg in ori_message
-    #                 )
-    #         input_prompts.append(input_prompt)
-    # else:
-    #     messages.append({"role": "user", "content": prompt}) 
-    #     if hashing_kv is not None:
-    #         args_hash = compute_args_hash(model, messages)
-    #         if_cache_return = await hashing_kv.get_by_id(args_hash)
-    #         if if_cache_return is not None:
-    #             return if_cache_return["return"]
-    #     try:
-    #         input_prompt = hf_tokenizer.apply_chat_template(
-    #             messages, tokenize=False, add_generation_prompt=True
-    #         )
-    #     except Exception:
-    #         try:
-    #             ori_message = copy.deepcopy(messages)
-    #             if messages[0]["role"] == "system":
-    #                 messages[1]["content"] = (
-    #                     "<system>"
-    #                     + messages[0]["content"]
-    #                     + "</system>\n"
-    #                     + messages[1]["content"]
-    #                 )
-    #                 messages = messages[1:]
-    #                 input_prompt = hf_tokenizer.apply_chat_template(
-    #                     messages, tokenize=False, add_generation_prompt=True
-    #                 )
-    #         except Exception:
-    #             len_message = len(ori_message)
-    #             for msgid in range(len_message):
-    #                 input_prompt = (
-    #                     input_prompt
-    #                     + "<"
-    #                     + ori_message[msgid]["role"]
-    #                     + ">"
-    #                     + ori_message[msgid]["content"]
-    #                     + "</"
-    #                     + ori_message[msgid]["role"]
-    #                     + ">\n"
-    #                 )
-    #     input_prompts.append(input_prompt)
-
+    if DEBUG:
+        logger.debug("hf_model's input_prompts: " + str(len(input_prompts)))
     if len(input_prompts) == 0:
         return if_cache_return["return"]
     
@@ -356,24 +374,26 @@ async def hf_model_if_cache(
     # output = hf_model.generate(
     #     **input_ids, max_new_tokens=512, num_return_sequences=1, early_stopping=True
     # )
-    outputs = hf_model.generate(
-        **input_ids, max_new_tokens=512, num_return_sequences=1
-    )
-
+    # outputs = hf_model.generate(
+    #     **input_ids, max_new_tokens=512, num_return_sequences=1
+    # )
+    with autocast():
+        outputs = hf_model.generate(**input_ids, max_new_tokens=512, num_return_sequences=len(input_prompts), early_stopping=True)
     # 解码所有响应
     response_texts = []
     for i in range(len(outputs)):
         response_text = hf_tokenizer.decode(
             outputs[i][len(inputs["input_ids"][i]):], skip_special_tokens=True
         )
-        if DEBUG:
-            logger.debug("hf_model's decoded output:\n" + response_text)
+        # if DEBUG:
+        #     logger.debug("hf_model's decoded output:\n" + response_text)
         if hashing_kv is not None:
             await hashing_kv.upsert({args_hash: {"return": response_text, "model": model}})
         response_texts.append(response_text)
 
     # `response_texts` 中将包含所有响应
-
+    if DEBUG:
+        logger.debug("hf_model's response_texts:\n" + str(response_texts))
     return response_texts
 
 

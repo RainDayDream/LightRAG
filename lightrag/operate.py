@@ -238,7 +238,6 @@ async def _merge_edges_then_upsert(
 
     return edge_data
 
-
 async def extract_entities(
     chunks: dict[str, TextChunkSchema],
     knowledge_graph_inst: BaseGraphStorage,
@@ -248,7 +247,7 @@ async def extract_entities(
 ) -> Union[BaseGraphStorage, None]:
     use_llm_func: callable = global_config["llm_model_func"]
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
-    chunk_batch_size = global_config["chunk_batch_size"]
+
     ordered_chunks = list(chunks.items())
 
     entity_extract_prompt = PROMPTS["entity_extraction"]
@@ -265,7 +264,6 @@ async def extract_entities(
     already_entities = 0
     already_relations = 0
 
-    #xym's comments: use llm to extract nodes and edges from chunks,使用大模型提取块中的实体和边
     async def _process_single_content(chunk_key_dp: tuple[str, TextChunkSchema]):
         nonlocal already_processed, already_entities, already_relations
         chunk_key = chunk_key_dp[0]
@@ -274,15 +272,10 @@ async def extract_entities(
         hint_prompt = entity_extract_prompt.format(**context_base, input_text=content)
         final_result = await use_llm_func(hint_prompt)
 
-        if DEBUG:
-            # logger.debug(f"now is processing chunk {chunk_key},extracting entities and relations \n result {final_result} \n")
-            logger.debug(f"now is processing chunk {chunk_key},extracting entities and relations ")
         history = pack_user_ass_to_openai_messages(hint_prompt, final_result)
         for now_glean_index in range(entity_extract_max_gleaning):
             glean_result = await use_llm_func(continue_prompt, history_messages=history)
-            if DEBUG:
-                # logger.debug(f"now is in {chunk_key}'s glean_index,extract entities and relations \n glean_result is :{glean_result} \n")
-                logger.debug(f"now is in {chunk_key}'s glean_index,extract additional entities and relations ")
+
             history += pack_user_ass_to_openai_messages(continue_prompt, glean_result)
             final_result += glean_result
             if now_glean_index == entity_extract_max_gleaning - 1:
@@ -337,56 +330,155 @@ async def extract_entities(
         )
         return dict(maybe_nodes), dict(maybe_edges)
 
-    # # use_llm_func is wrapped in ascynio.Semaphore, limiting max_async callings
-    # results = await asyncio.gather(
-    #     *[_process_single_content(c) for c in ordered_chunks]
-    # )
-    # print()  # clear the progress bar
+    # use_llm_func is wrapped in ascynio.Semaphore, limiting max_async callings
+    results = await asyncio.gather(
+        *[_process_single_content(c) for c in ordered_chunks]
+    )
+    print()  # clear the progress bar
+    maybe_nodes = defaultdict(list)
+    maybe_edges = defaultdict(list)
+    for m_nodes, m_edges in results:
+        for k, v in m_nodes.items():
+            maybe_nodes[k].extend(v)
+        for k, v in m_edges.items():
+            maybe_edges[tuple(sorted(k))].extend(v)
+    all_entities_data = await asyncio.gather(
+        *[
+            _merge_nodes_then_upsert(k, v, knowledge_graph_inst, global_config)
+            for k, v in maybe_nodes.items()
+        ]
+    )
+    all_relationships_data = await asyncio.gather(
+        *[
+            _merge_edges_then_upsert(k[0], k[1], v, knowledge_graph_inst, global_config)
+            for k, v in maybe_edges.items()
+        ]
+    )
+    if not len(all_entities_data):
+        logger.warning("Didn't extract any entities, maybe your LLM is not working")
+        return None
+    if not len(all_relationships_data):
+        logger.warning(
+            "Didn't extract any relationships, maybe your LLM is not working"
+        )
+        return None
+
+    if entity_vdb is not None:
+        data_for_vdb = {
+            compute_mdhash_id(dp["entity_name"], prefix="ent-"): {
+                "content": dp["entity_name"] + dp["description"],
+                "entity_name": dp["entity_name"],
+            }
+            for dp in all_entities_data
+        }
+        await entity_vdb.upsert(data_for_vdb)
+
+    if relationships_vdb is not None:
+        data_for_vdb = {
+            compute_mdhash_id(dp["src_id"] + dp["tgt_id"], prefix="rel-"): {
+                "src_id": dp["src_id"],
+                "tgt_id": dp["tgt_id"],
+                "content": dp["keywords"]
+                + dp["src_id"]
+                + dp["tgt_id"]
+                + dp["description"],
+            }
+            for dp in all_relationships_data
+        }
+        await relationships_vdb.upsert(data_for_vdb)
+
+    return knowledge_graph_inst
+
+
+async def extract_entities_batch(
+    chunks: dict[str, TextChunkSchema],
+    knowledge_graph_inst: BaseGraphStorage,
+    entity_vdb: BaseVectorStorage,
+    relationships_vdb: BaseVectorStorage,
+    global_config: dict,
+) -> Union[BaseGraphStorage, None]:
+    use_llm_func: callable = global_config["llm_model_func"]
+    entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
+    chunk_batch_size = global_config["chunk_batch_size"]
+    ordered_chunks = list(chunks.items())
+
+    entity_extract_prompt = PROMPTS["entity_extraction"]
+    context_base = dict(
+        tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
+        record_delimiter=PROMPTS["DEFAULT_RECORD_DELIMITER"],
+        completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
+        entity_types=",".join(PROMPTS["DEFAULT_ENTITY_TYPES"]),
+    )
+    continue_prompt = PROMPTS["entiti_continue_extraction"]
+    if_loop_prompt = PROMPTS["entiti_if_loop_extraction"]
+
+    already_processed = 0
+    already_entities = 0
+    already_relations = 0
+
 
     #xym's comments: extract entities and relations using batch processing
     #static batch entities_extract
-    async def _process_batch_content(batch_chunk: list[tuple[str, TextChunkSchema]]):
+    async def _process_batch_content(batch_chunk: list[tuple[str, TextChunkSchema]], batch_size: int):
         '''
         batch_chunk: [(chunk_key,chunk),...]   chunks in a batch will be processed to LLM in one call
         batch_chunk: 对送入大模型的文本块进行批处理，增加效率，先实现static batch
         TODO: continuous batch, vllm/other methods
         '''
         nonlocal already_processed, already_entities, already_relations
+        #调用大模型对文本进行处理，提取实体和关系
         prompts = []
-        for chunk_key_dp in batch_chunk:
-            chunk_key = chunk_key_dp[0]
-            chunk_dp = chunk_key_dp[1]
-            content = chunk_dp["content"]
+        for chunk in batch_chunk:
+            content = chunk[1]["content"]
             hint_prompt = entity_extract_prompt.format(**context_base, input_text=content)
             prompts.append(hint_prompt)
-        # batch_size = len(batch_chunk)
-        final_results = await use_llm_func(prompts , batch_size = len(batch_chunk))
-        
+        final_results = await use_llm_func(prompts , batch_size = batch_size)
         if DEBUG:
-            # logger.debug(f"now is processing chunk {chunk_key},extracting entities and relations \n result {final_result} \n")
             logger.debug(f"now is processing chunks {batch_chunk[0][0]} ~ {batch_chunk[-1][0]},extracting entities and relations")
-        history = pack_user_ass_to_openai_messages(*prompts, *final_results)
+        
+        #保存每一个对话的历史数据，用于后续的对话
+        history = []
+        for i in range(batch_size) :
+            history.append(pack_user_ass_to_openai_messages(prompts[i], final_results[i]))
+
         for now_glean_index in range(entity_extract_max_gleaning):
-            glean_result = await use_llm_func(continue_prompt, history_messages=history)
+            #给每一个对话都增加一个continue_prompt
+            input_prompts = []
+            for i in range(len(history)) : 
+                input_prompts.append(continue_prompt)
+            glean_result = await use_llm_func(input_prompts,batch_size = batch_size, history_messages=history)
             if DEBUG:
-                # logger.debug(f"now is in {chunk_key}'s glean_index,extract entities and relations \n glean_result is :{glean_result} \n")
                 logger.debug(f"now is in {batch_chunk[0][0]} - {batch_chunk[-1][0]}'s glean_index,extract additional entities and relations ")
-            history += pack_user_ass_to_openai_messages(continue_prompt, *glean_result)
-            final_results.extend(glean_result)
+            #把每一个提取的结果保存到最后的结果中去
+            for i, result in enumerate(final_results):
+                result += glean_result[i]
             if now_glean_index == entity_extract_max_gleaning - 1:
                 break
-
+            #更新历史数据，用于下一次的对话
+            for index, single_history in enumerate(history):
+                single_history += pack_user_ass_to_openai_messages(continue_prompt, glean_result[index])
+            if_loop_prompts = []
+            for i in range(len(history)) : 
+                if_loop_prompts.append(if_loop_prompt)
             # 使用 if_loop_prompt 判断是否继续进行 gleaning
-            if_loop_result = await use_llm_func(if_loop_prompt, history_messages=history)
-            if_loop_result = if_loop_result.strip().strip('"').strip("'").lower()
-            if if_loop_result != "yes":
+            if_loop_results = await use_llm_func(if_loop_prompts, history_messages=history)
+            num = len(if_loop_results)
+            for index, if_loop_result in enumerate(if_loop_results):
+                if_loop_result = if_loop_result.strip().strip('"').strip("'").lower()
+                if if_loop_result != "yes":
+                    num -= 1
+            if num == 0:
                 break
+            # if_loop_result = if_loop_result.strip().strip('"').strip("'").lower()
+            # if if_loop_result != "yes":
+            #     break
 
         
 
         maybe_nodes = defaultdict(list)
         maybe_edges = defaultdict(list)
-        for final_result in final_results:
+        for i, final_result in enumerate(final_results):
+            chunk_key = batch_chunk[i][0]
             records = split_string_by_multi_markers(
                 final_result,
                 [context_base["record_delimiter"], context_base["completion_delimiter"]],
@@ -413,7 +505,7 @@ async def extract_entities(
                     maybe_edges[(if_relation["src_id"], if_relation["tgt_id"])].append(
                         if_relation
                     )
-        already_processed += len(batch_chunk)
+        already_processed += batch_size
         already_entities += len(maybe_nodes)
         already_relations += len(maybe_edges)
         now_ticks = PROMPTS["process_tickers"][
@@ -426,20 +518,25 @@ async def extract_entities(
         )
         return dict(maybe_nodes), dict(maybe_edges)
     
-    #number of chunks in a batch 
-    BATCH_SIZE = chunk_batch_size
+    # #number of chunks in a batch 
+    # BATCH_SIZE = chunk_batch_size
     # 将 ordered_chunks 按照 BATCH_SIZE 分组
     batches = [
-        ordered_chunks[i:i + BATCH_SIZE]
-        for i in range(0, len(ordered_chunks), BATCH_SIZE)
+        ordered_chunks[i:i + chunk_batch_size]
+        for i in range(0, len(ordered_chunks), chunk_batch_size)
     ]
-    # use_llm_func is wrapped in ascynio.Semaphore, limiting max_async callings
+
+    if DEBUG:
+        logger.debug(f"Total {len(ordered_chunks)} chunks divided into {len(batches)} batches.")
+        # logger.debug(f"Batches:\n{batches}")
+
     results = await asyncio.gather(
-        *[_process_batch_content(c) for c in batches]
-    )
+        *[_process_batch_content(c, len(c)) for c in batches]
+    )   
     print()  # clear the progress bar
 
-
+    if DEBUG:
+        logger.debug(f"Results:\n{results}")
     maybe_nodes = defaultdict(list)
     maybe_edges = defaultdict(list)
     for m_nodes, m_edges in results:
