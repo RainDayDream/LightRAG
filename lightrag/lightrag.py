@@ -70,7 +70,7 @@ class LightRAG:
     # entity extraction
     entity_extract_max_gleaning: int = 1
     entity_summary_to_max_tokens: int = 500
-    chunk_batch_size : int = 4
+    chunk_batch_size:int = 1,
 
     # node embedding
     node_embedding_algorithm: str = "node2vec"

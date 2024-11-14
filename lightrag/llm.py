@@ -610,7 +610,14 @@ async def hf_model_complete(
     model_name = kwargs["hashing_kv"].global_config["llm_model_name"]
     if DEBUG:
         logger.debug("hf_model_complete " + model_name)
-    return await hf_model_if_cache(
+    # return await hf_model_if_cache(
+    #     model_name,
+    #     prompt,
+    #     system_prompt=system_prompt,
+    #     history_messages=history_messages,
+    #     **kwargs,
+    # )
+    return await hf_model_if_cache_batch(
         model_name,
         prompt,
         system_prompt=system_prompt,
