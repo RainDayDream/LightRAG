@@ -16,6 +16,7 @@ from .operate import (
     global_query,
     hybrid_query,
     naive_query,
+    extract_entities_batch,
 )
 
 from .storage import (
@@ -229,7 +230,14 @@ class LightRAG:
             await self.chunks_vdb.upsert(inserting_chunks)
 
             logger.info("[Entity Extraction]...")
-            maybe_new_kg = await extract_entities(
+            # maybe_new_kg = await extract_entities(
+            #     inserting_chunks,
+            #     knowledge_graph_inst=self.chunk_entity_relation_graph,
+            #     entity_vdb=self.entities_vdb,
+            #     relationships_vdb=self.relationships_vdb,
+            #     global_config=asdict(self),
+            # )
+            maybe_new_kg = await extract_entities_batch(
                 inserting_chunks,
                 knowledge_graph_inst=self.chunk_entity_relation_graph,
                 entity_vdb=self.entities_vdb,

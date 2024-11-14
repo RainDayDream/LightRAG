@@ -361,7 +361,7 @@ async def hf_model_if_cache_batch(
                 )
         input_prompts.append(input_prompt)
     if DEBUG:
-        logger.debug("hf_model's input_prompts: " + str(len(input_prompts)))
+        logger.debug("hf_model's input_prompts's length is : " + str(len(input_prompts)))
     if len(input_prompts) == 0:
         return if_cache_return["return"]
     
@@ -374,26 +374,24 @@ async def hf_model_if_cache_batch(
     # output = hf_model.generate(
     #     **input_ids, max_new_tokens=512, num_return_sequences=1, early_stopping=True
     # )
-    # outputs = hf_model.generate(
-    #     **input_ids, max_new_tokens=512, num_return_sequences=1
-    # )
-    with autocast():
-        outputs = hf_model.generate(**input_ids, max_new_tokens=512, num_return_sequences=len(input_prompts), early_stopping=True)
+    outputs = hf_model.generate(
+        **input_ids, max_new_tokens=512, num_return_sequences=1
+    )
     # 解码所有响应
     response_texts = []
     for i in range(len(outputs)):
         response_text = hf_tokenizer.decode(
             outputs[i][len(inputs["input_ids"][i]):], skip_special_tokens=True
         )
-        # if DEBUG:
-        #     logger.debug("hf_model's decoded output:\n" + response_text)
+        if DEBUG:
+            logger.debug("hf_model's decoded output:\n" + response_text)
         if hashing_kv is not None:
             await hashing_kv.upsert({args_hash: {"return": response_text, "model": model}})
         response_texts.append(response_text)
-
-    # `response_texts` 中将包含所有响应
-    if DEBUG:
-        logger.debug("hf_model's response_texts:\n" + str(response_texts))
+    ##去掉前面的不必要的部分
+    # outputs = outputs[:, input_ids.input_ids.shape[1]:]
+    # response_batch = hf_tokenizer.batch_decode(outputs, skip_special_tokens=True)
+    # return response_batch
     return response_texts
 
 
