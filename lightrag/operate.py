@@ -405,8 +405,14 @@ async def extract_entities_batch(
     ordered_chunks = list(chunks.items())
     model_name = global_config["llm_model_name"]
     use_llm_func_init : callable = global_config["llm_model_initial"]
-    model, tokenier = initialize_hf_model_batch(model_name)
-
+    if use_llm_func_init is not None and callable(use_llm_func_init):
+        if DEBUG:
+            logger.debug("use_llm_func_init is callable, Initializing model...")
+        print("use_llm_func_init is callable, Initializing model...")
+        model, tokenier = use_llm_func_init(model_name)
+    else :
+        use_llm_func_init = initialize_hf_model_batch
+        model, tokenier = use_llm_func_init(model_name)
     entity_extract_prompt = PROMPTS["entity_extraction"]
     context_base = dict(
         tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],

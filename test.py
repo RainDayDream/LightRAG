@@ -7,12 +7,12 @@ from datetime import datetime
 import pandas as pd
 
 from lightrag import LightRAG, QueryParam
-from lightrag.llm import hf_model_complete, hf_embedding
+from lightrag.llm import hf_model_complete, hf_embedding, hf_model_complete_batch, initialize_hf_model_batch
 from lightrag.utils import EmbeddingFunc, logger, set_logger
 from lightrag.config import DEBUG
 from transformers import AutoModel, AutoTokenizer
 
-WORKING_DIR = "./dickens"
+WORKING_DIR = "./json"
 
 if not os.path.exists(WORKING_DIR):
     os.mkdir(WORKING_DIR)
@@ -25,7 +25,10 @@ else:
 rag = LightRAG(
     working_dir=WORKING_DIR,
     llm_model_func=hf_model_complete,
+    llm_model_func_batch = hf_model_complete_batch,
+    llm_model_initial = initialize_hf_model_batch,
     llm_model_name="Qwen/Qwen2.5-7B-Instruct",
+    chunk_batch_size = 6,
     embedding_func=EmbeddingFunc(
         embedding_dim=384,
         max_token_size=5000,
@@ -127,9 +130,13 @@ def monitor_function(func, csv_file_path, *args, **kwargs):
 
     return result
 
+t1 = time.time()
 # 执行插入操作并监控资源
 with open("./book.txt", "r", encoding="utf-8") as f:
     monitor_function(lambda: rag.insert(f.read()), csv_file_path ="./sys_resource/insert.csv")
+
+t2 = time.time()
+print(f"insert time: {t2-t1}")
 
 # 执行查询操作并监控资源
 modes = ["naive", "local", "global", "hybrid"]

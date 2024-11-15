@@ -320,6 +320,7 @@ def initialize_hf_model_batch(model_name):
 async def hf_model_if_cache_batch(
     model, prompt, system_prompt=None, history_messages=[], use_model=None, use_tokenizer=None, **kwargs
 ) -> str:
+    print("in hf_complete_if_cache " + model)
     if DEBUG:
         logger.debug("in hf_complete_if_cache " + model)
     model_name = model
