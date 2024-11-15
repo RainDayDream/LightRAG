@@ -26,6 +26,8 @@ from .base import (
 )
 from .prompt import GRAPH_FIELD_SEP, PROMPTS
 from .config import DEBUG
+from .llm import initialize_hf_model_batch
+
 
 def chunking_by_token_size(
     content: str, overlap_token_size=128, max_token_size=1024, tiktoken_model="gpt-4o"
@@ -401,6 +403,9 @@ async def extract_entities_batch(
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
     chunk_batch_size = global_config["chunk_batch_size"]
     ordered_chunks = list(chunks.items())
+    model_name = global_config["llm_model_name"]
+    use_llm_func_init : callable = global_config["llm_model_initial"]
+    model, tokenier = initialize_hf_model_batch(model_name)
 
     entity_extract_prompt = PROMPTS["entity_extraction"]
     context_base = dict(
@@ -432,7 +437,7 @@ async def extract_entities_batch(
             content = chunk[1]["content"]
             hint_prompt = entity_extract_prompt.format(**context_base, input_text=content)
             prompts.append(hint_prompt)
-        final_results = await use_llm_func(prompts , batch_size = batch_size)
+        final_results = await use_llm_func(prompts , batch_size = batch_size, use_model = model,use_tokenizer = tokenier)
         if DEBUG:
             logger.debug(f"now is processing chunks {batch_chunk[0][0]} ~ {batch_chunk[-1][0]},extracting entities and relations")
         
@@ -446,7 +451,7 @@ async def extract_entities_batch(
             input_prompts = []
             for i in range(len(history)) : 
                 input_prompts.append(continue_prompt)
-            glean_result = await use_llm_func(input_prompts,batch_size = batch_size, history_messages=history)
+            glean_result = await use_llm_func(input_prompts,batch_size = batch_size, history_messages=history,use_model = model,use_tokenizer = tokenier)
             if DEBUG:
                 logger.debug(f"now is in {batch_chunk[0][0]} - {batch_chunk[-1][0]}'s glean_index,extract additional entities and relations ")
             #把每一个提取的结果保存到最后的结果中去
@@ -461,7 +466,7 @@ async def extract_entities_batch(
             for i in range(len(history)) : 
                 if_loop_prompts.append(if_loop_prompt)
             # 使用 if_loop_prompt 判断是否继续进行 gleaning
-            if_loop_results = await use_llm_func(if_loop_prompts, history_messages=history)
+            if_loop_results = await use_llm_func(if_loop_prompts, history_messages=history,use_model = model,use_tokenizer = tokenier)
             num = len(if_loop_results)
             for index, if_loop_result in enumerate(if_loop_results):
                 if_loop_result = if_loop_result.strip().strip('"').strip("'").lower()

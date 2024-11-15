@@ -97,7 +97,7 @@ class LightRAG:
     llm_model_max_token_size: int = 32768
     llm_model_max_async: int = 16
     llm_model_kwargs: dict = field(default_factory=dict)
-
+    llm_model_initial:callable = gpt_4o_mini_complete
     # storage
     key_string_value_json_storage_cls: Type[BaseKVStorage] = JsonKVStorage
     vector_db_storage_cls: Type[BaseVectorStorage] = NanoVectorDBStorage
@@ -179,7 +179,9 @@ class LightRAG:
                 **self.llm_model_kwargs,
             )
         )
-
+        self.llm_model_initial = limit_async_func_call(self.embedding_func_max_async)(
+            self.llm_model_initial
+        )
     def insert(self, string_or_strings):
         loop = always_get_an_event_loop()
         return loop.run_until_complete(self.ainsert(string_or_strings))

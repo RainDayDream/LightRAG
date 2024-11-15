@@ -6,6 +6,7 @@ import aioboto3
 import aiohttp
 import numpy as np
 import ollama
+import time
 
 from openai import (
     AsyncOpenAI,
@@ -308,22 +309,24 @@ def initialize_hf_model_batch(model_name):
         model_name, device_map="auto", trust_remote_code=True
     )
     hf_model = AutoModelForCausalLM.from_pretrained(
-        model_name, device_map="auto", trust_remote_code=True
+        model_name, device_map="auto", trust_remote_code=True, torch_dtype="auto",
     )
+    if DEBUG:
+        logger.debug(hf_model)
     if hf_tokenizer.pad_token is None:
         hf_tokenizer.pad_token = hf_tokenizer.eos_token
-    # #parallel model 
-    # hf_model = torch.nn.DataParallel(hf_model, device_ids=[0, 1])  # Use GPUs 0 and 1
-    # hf_model = hf_model.to("cuda")
     return hf_model, hf_tokenizer
 
 async def hf_model_if_cache_batch(
-    model, prompt, system_prompt=None, history_messages=[], **kwargs
+    model, prompt, system_prompt=None, history_messages=[], use_model=None, use_tokenizer=None, **kwargs
 ) -> str:
     if DEBUG:
         logger.debug("in hf_complete_if_cache " + model)
     model_name = model
-    hf_model, hf_tokenizer = initialize_hf_model(model_name)
+    if use_model is None:
+        hf_model, hf_tokenizer = initialize_hf_model_batch(model_name)
+    hf_model = use_model
+    hf_tokenizer = use_tokenizer
     hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
     batch_size = kwargs.get("batch_size", None)
     if DEBUG:
@@ -379,9 +382,13 @@ async def hf_model_if_cache_batch(
     # output = hf_model.generate(
     #     **input_ids, max_new_tokens=512, num_return_sequences=1, early_stopping=True
     # )
+    # print("prompts:",input_prompts)
+    t1 = time.time()
     outputs = hf_model.generate(
-        **input_ids, max_new_tokens=512, num_return_sequences=1
+        **input_ids, max_new_tokens=512
     )
+    t2 = time.time()
+    print("hf_model's generate time is : " + str(t2 - t1))
     if DEBUG:
         logger.debug("generate successfully! hf_model's outputs's length is : " + str(len(outputs)))
     # 解码所有响应
@@ -612,7 +619,7 @@ async def bedrock_complete(
 
 
 async def hf_model_complete_batch(
-    prompt, system_prompt=None, history_messages=[], **kwargs
+    prompt, system_prompt=None, history_messages=[], use_model=None, use_tokenier=None, **kwargs
 ) -> str:
     model_name = kwargs["hashing_kv"].global_config["llm_model_name"]
     if DEBUG:
@@ -629,6 +636,8 @@ async def hf_model_complete_batch(
         prompt,
         system_prompt=system_prompt,
         history_messages=history_messages,
+        use_model=use_model,
+        use_tokenier=use_tokenier,
         **kwargs,
     )
 
